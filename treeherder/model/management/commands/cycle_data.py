@@ -111,6 +111,7 @@ class PerfherderCycler(DataCycler):
         try:
             for strategy in self.strategies:
                 try:
+                    logger.warning(f'Cycling data using {strategy.name}...')
                     self._delete_in_chunks(strategy)
                 except NoDataCyclingAtAll as ex:
                     logger.warning(str(ex))
@@ -170,12 +171,17 @@ class PerfherderCycler(DataCycler):
             logger.warning(f'{msg}: (Exception: {exception})')
         else:
             logger.warning(msg)
-            raise NoDataCyclingAtAll from exception
+            raise NoDataCyclingAtAll() from exception
 
 
 class RemovalStrategy(ABC):
     @abstractmethod
     def remove(self, using: CursorWrapper):
+        pass
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
         pass
 
     @staticmethod
@@ -214,6 +220,10 @@ class MainRemovalStrategy(RemovalStrategy):
         ''',
             [self._max_timestamp, chunk_size],
         )
+
+    @property
+    def name(self) -> str:
+        return 'main removal strategy'
 
     def _find_ideal_chunk_size(self) -> int:
         max_id = self._manager.filter(push_timestamp__gt=self._max_timestamp).order_by('-id')[0].id
@@ -263,6 +273,10 @@ class TryDataRemoval(RemovalStrategy):
             signature_ids = signature_ids[1:]
             if not signature_ids:
                 break  # no worth trying; couldn't delete any data
+
+    @property
+    def name(self) -> str:
+        return 'try data removal strategy'
 
     def __attempt_remove(self, using, from_signature: int):
         chunk_size = self._find_ideal_chunk_size(from_signature)

@@ -296,34 +296,14 @@ class TryDataRemoval(RemovalStrategy):
         return 'try data removal strategy'
 
     def __attempt_remove(self, using):
-        chunk_size = self._find_ideal_chunk_size()
         using.execute(
             '''
             DELETE FROM `performance_datum`
             WHERE repository_id = %s AND push_timestamp <= %s AND signature_id = %s
             LIMIT %s
         ''',
-            [self.try_repo, self._max_timestamp, self.target_signature, chunk_size],
+            [self.try_repo, self._max_timestamp, self.target_signature, self._chunk_size],
         )
-
-    def _find_ideal_chunk_size(self) -> int:
-        max_id = (
-            self._manager.filter(
-                push_timestamp__gt=self._max_timestamp,
-                repository_id=self.try_repo,
-                signature_id=self.target_signature,
-            )
-            .order_by('-id')[0]
-            .id
-        )
-        older_ids = self._manager.filter(
-            push_timestamp__lte=self._max_timestamp,
-            id__lte=max_id,
-            repository_id=self.try_repo,
-            signature_id=self.target_signature,
-        ).order_by('id')[: self._chunk_size]
-
-        return len(older_ids) or self._chunk_size
 
     def __lookup_new_signature(self):
         try:

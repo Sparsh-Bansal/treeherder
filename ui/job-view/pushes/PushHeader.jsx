@@ -20,7 +20,6 @@ import { getUrlParam } from '../../helpers/location';
 import { notify } from '../redux/stores/notifications';
 import { setSelectedJob } from '../redux/stores/selectedJob';
 import { pinJobs } from '../redux/stores/pinnedJobs';
-import { updateRange } from '../redux/stores/pushes';
 
 import PushActionMenu from './PushActionMenu';
 
@@ -149,10 +148,9 @@ class PushHeader extends React.Component {
   };
 
   updateView = (param, value) => {
-    const { updateRange, pushRoute, currentRepo } = this.props;
+    const { pushRoute, currentRepo } = this.props;
 
     pushRoute({ search: `?repo=${currentRepo.name}&${param}=${value}` });
-    updateRange({ [param]: value });
   };
 
   pinAllShownJobs = () => {
@@ -371,6 +369,5 @@ export default connect(mapStateToProps, {
   notify,
   setSelectedJob,
   pinJobs,
-  updateRange,
   pushRoute,
 })(PushHeader);

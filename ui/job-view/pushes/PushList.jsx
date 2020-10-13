@@ -67,7 +67,14 @@ class PushList extends React.Component {
     const params = [...new URLSearchParams(search)];
 
     return params.reduce((acc, [key, value]) => {
-      return ['repo', 'startdate', 'enddate', 'nojobs'].includes(key)
+      return [
+        'repo',
+        'startdate',
+        'enddate',
+        'nojobs',
+        'author',
+        'revision',
+      ].includes(key)
         ? { ...acc, [key]: value }
         : acc;
     }, {});

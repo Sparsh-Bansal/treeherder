@@ -248,6 +248,8 @@ class TryDataRemoval(RemovalStrategy):
         self._manager = PerformanceDatum.objects
 
         self.__try_repo_id = None
+        self.__target_signature = None
+        self.__try_signatures = None
 
     @property
     def try_repo(self):
@@ -255,46 +257,61 @@ class TryDataRemoval(RemovalStrategy):
             self.__try_repo_id = Repository.objects.get(name='try').id
         return self.__try_repo_id
 
+    @property
+    def target_signature(self):
+        if self.__target_signature is None:
+            self.__target_signature = self.try_signatures[0]
+        return self.__target_signature
+
+    @property
+    def try_signatures(self):
+        if self.__try_signatures is None:
+            self.__try_signatures = list(
+                PerformanceSignature.objects.filter(repository=self.try_repo)
+                .order_by('-id')
+                .values_list('id', flat=True)
+            )
+        return self.__try_signatures
+
     def remove(self, using: CursorWrapper):
         """
         @type using: database connection cursor
         """
-        signature_ids = PerformanceSignature.objects.filter(repository=self.try_repo).values_list(
-            'id', flat=True
-        )
 
         while True:
-            self.__attempt_remove(using, signature_ids[0])
+            self.__attempt_remove(using)
 
             deleted_rows = using.rowcount
             if deleted_rows > 0:
-                break  # deletion was succesfull
+                break  # deletion was successful
 
-            signature_ids = signature_ids[1:]
-            if not signature_ids:
-                break  # no worth trying; couldn't delete any data
+            try:
+                self.__lookup_new_signature()  # to remove data from
+            except LookupError as ex:
+                logger.debug(f'Could not target any new signature to delete data from. {ex}')
+                break
 
     @property
     def name(self) -> str:
         return 'try data removal strategy'
 
-    def __attempt_remove(self, using, from_signature: int):
-        chunk_size = self._find_ideal_chunk_size(from_signature)
+    def __attempt_remove(self, using):
+        chunk_size = self._find_ideal_chunk_size()
         using.execute(
             '''
             DELETE FROM `performance_datum`
             WHERE repository_id = %s AND push_timestamp <= %s AND signature_id = %s
             LIMIT %s
         ''',
-            [self.try_repo, self._max_timestamp, from_signature, chunk_size],
+            [self.try_repo, self._max_timestamp, self.target_signature, chunk_size],
         )
 
-    def _find_ideal_chunk_size(self, from_signature: int) -> int:
+    def _find_ideal_chunk_size(self) -> int:
         max_id = (
             self._manager.filter(
                 push_timestamp__gt=self._max_timestamp,
                 repository_id=self.try_repo,
-                signature_id=from_signature,
+                signature_id=self.target_signature,
             )
             .order_by('-id')[0]
             .id
@@ -303,10 +320,16 @@ class TryDataRemoval(RemovalStrategy):
             push_timestamp__lte=self._max_timestamp,
             id__lte=max_id,
             repository_id=self.try_repo,
-            signature_id=from_signature,
+            signature_id=self.target_signature,
         ).order_by('id')[: self._chunk_size]
 
         return len(older_ids) or self._chunk_size
+
+    def __lookup_new_signature(self):
+        try:
+            self.__target_signature = self.__try_signatures.pop()
+        except IndexError:
+            raise LookupError('Exhausted all signatures originating from try repository.')
 
 
 class Command(BaseCommand):

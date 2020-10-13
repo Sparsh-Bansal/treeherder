@@ -113,7 +113,7 @@ class PerfherderCycler(DataCycler):
                 try:
                     self._delete_in_chunks(strategy)
                 except NoDataCyclingAtAll as ex:
-                    logger.warning('Exception: {}'.format(ex))
+                    logger.warning(str(ex))
 
             # also remove any signatures which are (no longer) associated with
             # a job
@@ -249,26 +249,47 @@ class TryDataRemoval(RemovalStrategy):
         """
         @type using: database connection cursor
         """
-        chunk_size = self._find_ideal_chunk_size()
+        signature_ids = PerformanceSignature.objects.filter(repository=self.try_repo).values_list(
+            'id', flat=True
+        )
+
+        while True:
+            self.__attempt_remove(using, signature_ids[0])
+
+            deleted_rows = using.rowcount
+            if deleted_rows > 0:
+                break  # deletion was succesfull
+
+            signature_ids = signature_ids[1:]
+            if not signature_ids:
+                break  # no worth trying; couldn't delete any data
+
+    def __attempt_remove(self, using, from_signature: int):
+        chunk_size = self._find_ideal_chunk_size(from_signature)
         using.execute(
             '''
             DELETE FROM `performance_datum`
-            WHERE repository_id = %s AND push_timestamp <= %s
+            WHERE repository_id = %s AND push_timestamp <= %s AND signature_id = %s
             LIMIT %s
         ''',
-            [self.try_repo, self._max_timestamp, chunk_size],
+            [self.try_repo, self._max_timestamp, from_signature, chunk_size],
         )
 
-    def _find_ideal_chunk_size(self) -> int:
+    def _find_ideal_chunk_size(self, from_signature: int) -> int:
         max_id = (
             self._manager.filter(
-                push_timestamp__gt=self._max_timestamp, repository_id=self.try_repo
+                push_timestamp__gt=self._max_timestamp,
+                repository_id=self.try_repo,
+                signature_id=from_signature,
             )
             .order_by('-id')[0]
             .id
         )
         older_ids = self._manager.filter(
-            push_timestamp__lte=self._max_timestamp, id__lte=max_id, repository_id=self.try_repo
+            push_timestamp__lte=self._max_timestamp,
+            id__lte=max_id,
+            repository_id=self.try_repo,
+            signature_id=from_signature,
         ).order_by('id')[: self._chunk_size]
 
         return len(older_ids) or self._chunk_size

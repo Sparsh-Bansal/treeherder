@@ -241,6 +241,8 @@ class TryDataRemoval(RemovalStrategy):
     that are more than 6 weeks old.
     """
 
+    SIGNATURE_BULK_SIZE = 10
+
     def __init__(self, chunk_size: int):
         self._cycle_interval = timedelta(weeks=6)
         self._chunk_size = chunk_size
@@ -248,7 +250,7 @@ class TryDataRemoval(RemovalStrategy):
         self._manager = PerformanceDatum.objects
 
         self.__try_repo_id = None
-        self.__target_signature = None
+        self.__target_signatures = None
         self.__try_signatures = None
 
     @property
@@ -258,10 +260,10 @@ class TryDataRemoval(RemovalStrategy):
         return self.__try_repo_id
 
     @property
-    def target_signature(self):
-        if self.__target_signature is None:
-            self.__target_signature = self.try_signatures[0]
-        return self.__target_signature
+    def target_signatures(self):
+        if self.__target_signatures is None:
+            self.__target_signatures = self.try_signatures[: self.SIGNATURE_BULK_SIZE]
+        return self.__target_signatures
 
     @property
     def try_signatures(self):
@@ -296,19 +298,28 @@ class TryDataRemoval(RemovalStrategy):
         return 'try data removal strategy'
 
     def __attempt_remove(self, using):
-        using.execute(
-            '''
+        from_target_signatures = '('
+        for _ in self.target_signatures:
+            from_target_signatures += 'signature_id = %s OR '
+        from_target_signatures = from_target_signatures[:-4]
+        from_target_signatures += ')'
+
+        delete_try_data = f'''
             DELETE FROM `performance_datum`
-            WHERE repository_id = %s AND push_timestamp <= %s AND signature_id = %s
+            WHERE repository_id = %s AND push_timestamp <= %s AND {from_target_signatures}
             LIMIT %s
-        ''',
-            [self.try_repo, self._max_timestamp, self.target_signature, self._chunk_size],
+        '''
+        # logger.warning(delete_try_data)
+        using.execute(
+            delete_try_data,
+            [self.try_repo, self._max_timestamp, *self.target_signatures, self._chunk_size],
         )
 
     def __lookup_new_signature(self):
-        try:
-            self.__target_signature = self.__try_signatures.pop()
-        except IndexError:
+        self.__target_signatures = self.__try_signatures[: self.SIGNATURE_BULK_SIZE]
+        del self.__try_signatures[: self.SIGNATURE_BULK_SIZE]
+
+        if len(self.__target_signatures) == 0:
             raise LookupError('Exhausted all signatures originating from try repository.')
 
 
